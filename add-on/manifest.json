@@ -12,5 +12,11 @@
   "scripts": [
     "msparser.js",
     "parser.js"
+  ],
+  "dependencies": {
+    "Python": {}
+  },
+  "permissions": [
+    "launchPython"
   ]
 }

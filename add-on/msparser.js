@@ -26,7 +26,7 @@ var msParser = (function()
                 try
                 {
                     // Extract direct download link from fuckingfast.co URL
-                    self.extractFuckingFastDirectLink(url)
+                    self.extractFuckingFastDirectLink(url, obj.requestId || 0, obj.interactive || false)
                         .then(function (directLink) {
                             console.log("FDM msParser: Successfully extracted direct link: " + directLink.substring(0, 50) + "...");
 
@@ -100,58 +100,24 @@ var msParser = (function()
         },
 
         // Helper methods
-        extractFuckingFastDirectLink: function (fuckingFastUrl) {
+        extractFuckingFastDirectLink: function (fuckingFastUrl, requestId, interactive) {
             console.log("FDM msParser: extractFuckingFastDirectLink called with: " + fuckingFastUrl);
 
-            var cookiesStr = this._cookiesStr || "";
-
             return new Promise(function (resolve, reject) {
-                downloadUrlAsUtf8Text(fuckingFastUrl, cookiesStr, [
-                    { key: "User-Agent", value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
-                ], "")
-                    .then(function (response) {
-                        console.log("FDM msParser: Received response from fuckingfast.co");
-
-                        if (!response || !response.body) {
-                            reject("Empty response from fuckingfast.co");
-                            return;
-                        }
-
-                        try {
-                            var body = response.body;
-                            var directLink = null;
-
-                            // Pattern 1: window.open("https://.../dl/...")
-                            var m = body.match(/window\.open\(\s*["'](https?:\/\/(?:dl\.)?fuckingfast\.co\/dl\/[^"']+)["']/);
-                            if (m) { directLink = m[1]; }
-
-                            // Pattern 2: href="https://.../dl/..."
-                            if (!directLink) {
-                                m = body.match(/href=["'](https?:\/\/(?:dl\.)?fuckingfast\.co\/dl\/[^"']+)["']/);
-                                if (m) { directLink = m[1]; }
-                            }
-
-                            // Pattern 3: any host direct /dl/ URL in script tags
-                            if (!directLink) {
-                                m = body.match(/(https?:\/\/(?:dl\.)?fuckingfast\.co\/dl\/[^\s"'<>]+)/);
-                                if (m) { directLink = m[1]; }
-                            }
-
-                            if (directLink) {
-                                console.log("FDM msParser: Found direct download link: " + directLink);
-                                resolve(directLink);
-                            } else {
-                                console.log("FDM msParser: Could not find direct download link in page");
-                                reject("Could not extract direct download link from fuckingfast.co page");
-                            }
-                        } catch (e) {
-                            console.log("FDM msParser: Error parsing fuckingfast.co response: " + e);
-                            reject("Error parsing fuckingfast.co response: " + e);
+                launchPythonScript(requestId, interactive, "get_ff_link.py", [fuckingFastUrl])
+                    .then(function(result) {
+                        if (result.exitCode === 0 && result.output) {
+                            var directLink = result.output.trim();
+                            console.log("FDM msParser: Successfully extracted direct link via python: " + directLink.substring(0, 50) + "...");
+                            resolve(directLink);
+                        } else {
+                            console.log("FDM msParser: Python script failed with exit code " + result.exitCode + ", output: " + result.output);
+                            reject("Failed to extract direct link from fuckingfast.co: python script failed");
                         }
                     })
-                    .catch(function (err) {
-                        console.log("FDM msParser: Failed to fetch fuckingfast.co page: " + err);
-                        reject("Failed to fetch fuckingfast.co page: " + err);
+                    .catch(function(err) {
+                        console.log("FDM msParser: launchPythonScript error: " + err);
+                        reject("launchPythonScript error: " + err);
                     });
             });
         },
