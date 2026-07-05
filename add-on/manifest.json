@@ -2,7 +2,7 @@
   "uuid": "fistgirl",
   "name": "Fistgirl",
   "description": "It grabs links from paste.fitgirl-repacks.site and then redirects direct download links to fdm",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "icon": "icon.svg",
   "mediaParser": true,
   "mediaListParser": true,
