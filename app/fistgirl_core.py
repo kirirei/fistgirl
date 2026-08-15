@@ -41,6 +41,7 @@ DEBUG_PORT = 9344
 PROFILE_DIR = os.path.join(tempfile.gettempdir(), "fistgirl_app_profile")
 PAGE_TIMEOUT = 45          # seconds to resolve a single link
 BROWSER_BOOT_TIMEOUT = 45  # seconds to wait for Chrome's debug port
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0   # CREATE_NO_WINDOW (no console flash)
 
 
 # --------------------------------------------------------------------------- #
@@ -330,7 +331,7 @@ class BrowserResolver:
                         subprocess.run(
                             ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            timeout=10, check=False)
+                            timeout=10, check=False, creationflags=_NO_WINDOW)
                     except Exception:
                         pass
         except Exception:

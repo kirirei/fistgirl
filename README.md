@@ -27,7 +27,7 @@ direct-download link, which is then handed to FDM.
 > fetch in the app, and when idle in the `.fda` plugin — so nothing is left
 > running. The plugin fetches the grouped file list like the classic add-on.
 
-## Downloads (v1.0.7)
+## Downloads (v1.0.8)
 
 <p align="center">
   <a href="https://github.com/kirirei/fistgirl/releases/latest">

@@ -53,6 +53,7 @@ PAGE_TIMEOUT = 45          # seconds to wait for a single link to resolve
 BROWSER_BOOT_TIMEOUT = 45  # seconds to wait for Chrome's debug port to appear
 IDLE_TIMEOUT = 30          # close Chrome this long after the last resolved link
 DEBUG = os.environ.get("FISTGIRL_DEBUG") == "1"
+_NO_WINDOW = 0x08000000 if os.name == "nt" else 0   # CREATE_NO_WINDOW (no console flash)
 
 
 def log(*a):
@@ -193,7 +194,7 @@ def _kill_chrome():
             try:
                 subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                               timeout=10, check=False)
+                               timeout=10, check=False, creationflags=_NO_WINDOW)
             except Exception:
                 pass
         else:

@@ -125,6 +125,9 @@ class App(ctk.CTk):
         bar.grid(row=1, column=0, padx=12, pady=0, sticky="ew")
         self.count_label = ctk.CTkLabel(bar, text="No files yet")
         self.count_label.pack(side="left", padx=8, pady=4)
+        self.group_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(bar, text="Group into one folder", variable=self.group_var,
+                        width=20).pack(side="left", padx=12, pady=4)
         ctk.CTkButton(bar, text="Select all", width=90,
                       command=lambda: self._set_all(True)).pack(side="right", padx=4, pady=4)
         ctk.CTkButton(bar, text="Select none", width=90,
@@ -269,6 +272,8 @@ class App(ctk.CTk):
 
         total = len(selected)
         ok, failed, links = 0, [], []
+        grouped = mode == "fdm" and bool(getattr(self, "group_var", None) and self.group_var.get())
+        game = core.group_title(selected) if grouped else None
         try:
             for i, it in enumerate(selected, 1):
                 self._set_status("Resolving %d/%d: %s" % (i, total, it["filename"][:40]),
@@ -283,7 +288,7 @@ class App(ctk.CTk):
                     self.log("✗ could not resolve %s" % it["filename"])
                     continue
                 links.append(direct)
-                if mode == "fdm":
+                if mode == "fdm" and not grouped:
                     try:
                         await loop.run_in_executor(None, fdm_client.add_download, direct)
                         ok += 1
@@ -295,14 +300,21 @@ class App(ctk.CTk):
                     ok += 1
                     self.log("✓ resolved: %s" % it["filename"])
                 self._set_status("Done %d/%d" % (i, total), i / total)
-                await asyncio.sleep(0.3 if mode == "fdm" else 0.05)
+                await asyncio.sleep(0.3 if (mode == "fdm" and not grouped) else 0.05)
 
-            if mode == "clipboard" and links:
+            if links and (mode == "clipboard" or grouped):
                 text = "\n".join(links)
-                self._ui(lambda: (self.clipboard_clear(), self.clipboard_append(text)))
-                self.log("Copied %d link(s) to clipboard." % len(links))
+                self._ui(lambda t=text: (self.clipboard_clear(), self.clipboard_append(t)))
+                if grouped:
+                    self.log("Grouped: %d link(s) copied. In FDM open 'Add downloads in batch', "
+                             "paste them, and set the folder to \"%s\"." % (len(links), game))
+                else:
+                    self.log("Copied %d link(s) to clipboard." % len(links))
 
-            where = "sent to FDM" if mode == "fdm" else "resolved & copied"
+            if grouped:
+                where = "resolved for grouping (links copied)"
+            else:
+                where = "sent to FDM" if mode == "fdm" else "resolved & copied"
             msg = "Done: %d %s" % (ok, where) + (", %d failed" % len(failed) if failed else "")
             self._set_status(msg, 1.0)
             self.log(msg)
