@@ -1,0 +1,9 @@
+# Keep LF for all text files so bash heredocs in CI and Python behave
+# consistently regardless of the checkout OS.
+* text=auto eol=lf
+
+# Binary assets - never touch line endings.
+*.fda binary
+*.png binary
+*.ico binary
+*.dat binary

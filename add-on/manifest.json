@@ -2,11 +2,11 @@
   "uuid": "fistgirl",
   "name": "Fistgirl",
   "description": "It grabs links from paste.fitgirl-repacks.site and then redirects direct download links to fdm",
-  "version": "1.0.3",
+  "version": "1.0.6",
   "icon": "icon.svg",
   "mediaParser": true,
   "mediaListParser": true,
-  "updateUrl": "https://github.com/sagarchaulagai/fistgirl/raw/refs/heads/main/fistgirl-update.json",
+  "updateUrl": "https://github.com/kirirei/fistgirl/raw/refs/heads/main/fistgirl-update.json",
   "minApiVersion": 7,
   "targetApiVersion": 9,
   "scripts": [
@@ -14,7 +14,9 @@
     "parser.js"
   ],
   "dependencies": {
-    "Python": {}
+    "Python": {
+      "minVersion": "3.10"
+    }
   },
   "permissions": [
     "launchPython"

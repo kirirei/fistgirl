@@ -1,0 +1,2 @@
+nodriver>=0.50
+customtkinter>=5.2

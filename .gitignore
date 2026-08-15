@@ -1,0 +1,20 @@
+# Vendored Python deps are produced by the release workflow and bundled into
+# fistgirl.fda; no need to track them in git.
+add-on/vendor/
+
+# Build outputs / local leftovers (the .fda and .exe are produced by CI or by
+# build_exe.bat; they are release assets, not tracked source).
+fistgirl.zip
+fistgirl.fda
+*.pyc
+__pycache__/
+
+# Standalone app's local virtualenv
+app/.venv/
+
+# Portable-exe build output + build environments (large binaries; reproducible
+# locally via build_exe.bat, or by the release workflow).
+dist/
+build/
+_buildenv/
+app/_pyi/

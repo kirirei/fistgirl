@@ -1,0 +1,150 @@
+name: Build & release
+
+# Builds all three Fistgirl products and publishes them to a single release:
+#   * fistgirl-python.zip        - standalone Python GUI app (works)
+#   * Fistgirl-portable-win64.zip - PyInstaller portable .exe (works)
+#   * fistgirl.fda               - FDM add-on/plugin (experimental, not reliable)
+#
+# The .fda vendors the pure-Python browser-automation dependency (nodriver + its
+# deps) for FDM's bundled Python 3.10 into add-on/vendor and zips the add-on/
+# folder. Nothing is committed back to the repo - the binaries are release assets
+# only (see .gitignore).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "screenshots/**"
+      - "documentation/**"
+      - "LICENSE"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10 (matches FDM's bundled Python)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # --- fistgirl.fda (FDM plugin) -------------------------------------------
+      - name: Vendor dependencies (pure-python) into add-on/vendor
+        shell: bash
+        run: |
+          set -e
+          rm -rf add-on/vendor
+          mkdir -p add-on/vendor
+          python -m pip install --upgrade pip
+          # Pure-python (py3-none-any) wheels resolved for Python 3.10; these
+          # import on ANY Python >= 3.10 FDM may use to run the plugin.
+          python -m pip install nodriver --target add-on/vendor \
+            --python-version 310 --only-binary=:all: --platform any
+          # Trim junk that bloats the .fda but isn't needed at runtime.
+          find add-on/vendor -type d -name "__pycache__" -prune -exec rm -rf {} + || true
+          find add-on/vendor -type d -name "*.dist-info" -prune -exec rm -rf {} + || true
+          find add-on/vendor -type d -name "*-stubs" -prune -exec rm -rf {} + || true
+          find add-on/vendor -type d -name "tests" -prune -exec rm -rf {} + || true
+          rm -rf add-on/vendor/bin || true
+
+      - name: Smoke-test the vendored import
+        shell: bash
+        run: |
+          set -e
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, "add-on/vendor")
+          import nodriver          # pulls its import-time deps (websockets, deprecated/wrapt)
+          import websockets
+          print("vendored import OK - nodriver", nodriver.__version__,
+                "| websockets", websockets.__version__)
+          PY
+
+      - name: Package add-on into fistgirl.fda
+        shell: pwsh
+        run: |
+          if (Test-Path fistgirl.zip) { Remove-Item fistgirl.zip -Force }
+          if (Test-Path fistgirl.fda) { Remove-Item fistgirl.fda -Force }
+          Compress-Archive -Path "add-on\*" -DestinationPath "fistgirl.zip" -Force
+          Rename-Item "fistgirl.zip" "fistgirl.fda"
+          Write-Host "Built fistgirl.fda:"
+          Get-Item fistgirl.fda | Select-Object Name,Length
+
+      # --- fistgirl-python.zip (standalone source) -----------------------------
+      - name: Package the standalone Python app
+        shell: pwsh
+        run: |
+          if (Test-Path staging) { Remove-Item staging -Recurse -Force }
+          New-Item -ItemType Directory -Force staging\fistgirl-python | Out-Null
+          Copy-Item app\* staging\fistgirl-python\ -Recurse
+          if (Test-Path fistgirl-python.zip) { Remove-Item fistgirl-python.zip -Force }
+          Compress-Archive -Path "staging\fistgirl-python" -DestinationPath "fistgirl-python.zip" -Force
+          Get-Item fistgirl-python.zip | Select-Object Name,Length
+
+      # --- Fistgirl-portable-win64.zip (PyInstaller .exe) ----------------------
+      - name: Build the portable .exe
+        shell: pwsh
+        run: |
+          python -m venv _buildenv
+          & _buildenv\Scripts\python.exe -m pip install --upgrade pip
+          & _buildenv\Scripts\python.exe -m pip install -r app\requirements.txt pyinstaller
+          & _buildenv\Scripts\python.exe -m PyInstaller --noconfirm --name Fistgirl --windowed `
+              --collect-all customtkinter --collect-all nodriver `
+              --distpath dist --workpath _buildenv\build --specpath _buildenv `
+              app\app.py
+          if (-not (Test-Path "dist\Fistgirl\Fistgirl.exe")) { throw "PyInstaller build failed" }
+
+      - name: Package the portable .exe
+        shell: pwsh
+        run: |
+          if (Test-Path Fistgirl-portable-win64.zip) { Remove-Item Fistgirl-portable-win64.zip -Force }
+          Compress-Archive -Path "dist\Fistgirl" -DestinationPath "Fistgirl-portable-win64.zip" -Force
+          Get-Item Fistgirl-portable-win64.zip | Select-Object Name,Length
+
+      # --- artifacts + release -------------------------------------------------
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fistgirl-builds
+          path: |
+            fistgirl.fda
+            fistgirl-python.zip
+            Fistgirl-portable-win64.zip
+
+      - name: Publish/refresh the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          VERSION=$(python -c "import json;print(json.load(open('add-on/manifest.json'))['version'])")
+          gh release delete "v$VERSION" --yes --cleanup-tag 2>/dev/null || true
+          NOTES=$(cat <<'EOF'
+          Fistgirl — FitGirl paste link → Free Download Manager, with the
+          fuckingfast.co Cloudflare / Turnstile fix (Chrome driven off-screen).
+
+          Downloads — pick one:
+          * **fistgirl-python.zip** — Standalone Python GUI app (needs Python 3.10+). ✅ Recommended, works.
+          * **Fistgirl-portable-win64.zip** — Portable .exe, no Python needed. ✅ Works.
+          * **fistgirl.fda** — Classic FDM add-on/plugin. ⚠️ Experimental — currently NOT working reliably; included for reference.
+
+          Requires Google Chrome (or Edge) and Free Download Manager 6 installed.
+          EOF
+          )
+          gh release create "v$VERSION" \
+            fistgirl-python.zip \
+            Fistgirl-portable-win64.zip \
+            fistgirl.fda \
+            --title "fistgirl v$VERSION" \
+            --notes "$NOTES"
