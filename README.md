@@ -23,7 +23,11 @@ direct-download link, which is then handed to FDM.
 > Chrome is used **only to extract the links** — FDM still does the actual
 > downloading.
 
-## Downloads (v1.0.6)
+> **v1.0.7:** the off-screen Chrome now **closes automatically** — after each
+> fetch in the app, and when idle in the `.fda` plugin — so nothing is left
+> running. The plugin fetches the grouped file list like the classic add-on.
+
+## Downloads (v1.0.7)
 
 <p align="center">
   <a href="https://github.com/kirirei/fistgirl/releases/latest">
@@ -37,7 +41,7 @@ Each release ships **three** builds. **Pick one:**
 | --- | --- | --- |
 | **`fistgirl-python.zip`** | Standalone Windows GUI app (run from source). Needs Python 3.10+. | ✅ **Works — recommended** |
 | **`Fistgirl-portable-win64.zip`** | The same app as a portable `.exe`. No Python install needed. | ✅ **Works** |
-| **`fistgirl.fda`** | The classic FDM add-on/plugin. | ⚠️ **Experimental — currently NOT working reliably.** Kept for reference. |
+| **`fistgirl.fda`** | The classic FDM add-on/plugin (auto-closes Chrome when idle). | ⚠️ **Experimental — not guaranteed.** Use a Python build if it fails. |
 
 **In short:** use the **Standalone Python app** or the **Portable `.exe`**. The
 `.fda` plugin is included only for reference and is not guaranteed to work.

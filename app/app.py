@@ -269,44 +269,52 @@ class App(ctk.CTk):
 
         total = len(selected)
         ok, failed, links = 0, [], []
-        for i, it in enumerate(selected, 1):
-            self._set_status("Resolving %d/%d: %s" % (i, total, it["filename"][:40]),
-                             (i - 1) / total)
-            try:
-                direct = await self.resolver.resolve(it["ff_url"])
-            except Exception as e:
-                self.log("resolve error:", e)
-                direct = None
-            if not direct:
-                failed.append(it["filename"])
-                self.log("✗ could not resolve %s" % it["filename"])
-                continue
-            links.append(direct)
-            if mode == "fdm":
+        try:
+            for i, it in enumerate(selected, 1):
+                self._set_status("Resolving %d/%d: %s" % (i, total, it["filename"][:40]),
+                                 (i - 1) / total)
                 try:
-                    await loop.run_in_executor(None, fdm_client.add_download, direct)
-                    ok += 1
-                    self.log("✓ sent to FDM: %s" % it["filename"])
+                    direct = await self.resolver.resolve(it["ff_url"])
                 except Exception as e:
+                    self.log("resolve error:", e)
+                    direct = None
+                if not direct:
                     failed.append(it["filename"])
-                    self.log("FDM add failed for %s: %s" % (it["filename"], e))
-            else:
-                ok += 1
-                self.log("✓ resolved: %s" % it["filename"])
-            self._set_status("Done %d/%d" % (i, total), i / total)
-            await asyncio.sleep(0.3 if mode == "fdm" else 0.05)
+                    self.log("✗ could not resolve %s" % it["filename"])
+                    continue
+                links.append(direct)
+                if mode == "fdm":
+                    try:
+                        await loop.run_in_executor(None, fdm_client.add_download, direct)
+                        ok += 1
+                        self.log("✓ sent to FDM: %s" % it["filename"])
+                    except Exception as e:
+                        failed.append(it["filename"])
+                        self.log("FDM add failed for %s: %s" % (it["filename"], e))
+                else:
+                    ok += 1
+                    self.log("✓ resolved: %s" % it["filename"])
+                self._set_status("Done %d/%d" % (i, total), i / total)
+                await asyncio.sleep(0.3 if mode == "fdm" else 0.05)
 
-        if mode == "clipboard" and links:
-            text = "\n".join(links)
-            self._ui(lambda: (self.clipboard_clear(), self.clipboard_append(text)))
-            self.log("Copied %d link(s) to clipboard." % len(links))
+            if mode == "clipboard" and links:
+                text = "\n".join(links)
+                self._ui(lambda: (self.clipboard_clear(), self.clipboard_append(text)))
+                self.log("Copied %d link(s) to clipboard." % len(links))
 
-        where = "sent to FDM" if mode == "fdm" else "resolved & copied"
-        msg = "Done: %d %s" % (ok, where) + (", %d failed" % len(failed) if failed else "")
-        self._set_status(msg, 1.0)
-        self.log(msg)
-        if failed:
-            self.log("Failed: " + ", ".join(failed))
+            where = "sent to FDM" if mode == "fdm" else "resolved & copied"
+            msg = "Done: %d %s" % (ok, where) + (", %d failed" % len(failed) if failed else "")
+            self._set_status(msg, 1.0)
+            self.log(msg)
+            if failed:
+                self.log("Failed: " + ", ".join(failed))
+        finally:
+            # Close the off-screen Chrome now that this fetch is done, so it is
+            # never left running. The next fetch re-opens it (re-clears Cloudflare
+            # once). Runs even if the batch above errored out.
+            self.log("Closing background Chrome…")
+            await self.resolver.close()
+            self._resolver_started = False
 
     def _job_finished(self, fut):
         try:

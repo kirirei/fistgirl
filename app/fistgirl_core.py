@@ -12,7 +12,9 @@ fetch:
 The fuckingfast.co pages sit behind a Cloudflare managed challenge + Turnstile,
 so the last step drives the user's *installed* Chrome off-screen via the
 DevTools Protocol (the `nodriver` library) - exactly like the FDM add-on's
-get_ff_link.py, but here a single browser stays open for the whole batch.
+get_ff_link.py, but here a single browser is reused for the whole batch and then
+fully closed (BrowserResolver.close) when the batch finishes, so no Chrome is
+left running.
 
 The resulting dl.fuckingfast.co links are plain, signed URLs: any HTTP client
 (including FDM) can download them, and they carry a Content-Disposition header
@@ -185,6 +187,7 @@ class BrowserResolver:
     def __init__(self, log=None):
         self._browser = None
         self._uc = None
+        self._proc = None          # the Chrome process we spawned (so we can kill it)
         self._log = log or (lambda *a: None)
 
     # -- sync: make sure an off-screen Chrome is running with remote debugging --
@@ -221,9 +224,10 @@ class BrowserResolver:
         creationflags = 0
         if os.name == "nt":
             creationflags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
-        subprocess.Popen(args, creationflags=creationflags,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         stdin=subprocess.DEVNULL, close_fds=True)
+        # Keep the handle so close() can terminate this exact Chrome.
+        self._proc = subprocess.Popen(args, creationflags=creationflags,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                      stdin=subprocess.DEVNULL, close_fds=True)
         self._log("Starting background Chrome for link extraction...")
         deadline = time.time() + BROWSER_BOOT_TIMEOUT
         while time.time() < deadline:
@@ -296,8 +300,41 @@ class BrowserResolver:
         return captured.get("hx")
 
     async def close(self):
+        """Fully shut down the off-screen Chrome.
+
+        nodriver only *attached* to a Chrome we spawned ourselves, so
+        Browser.stop() does not kill it - we must terminate the process. We try,
+        in order: a graceful CDP Browser.close, nodriver's stop(), then killing
+        the process we spawned (taskkill /T on Windows to take the child tree).
+        """
+        # (a) graceful: ask Chrome to close everything via CDP.
+        try:
+            if self._browser is not None and self._uc is not None:
+                from nodriver import cdp
+                await self._browser.connection.send(cdp.browser.close())
+        except Exception:
+            pass
+        # (b) let nodriver drop its connection/bookkeeping.
         try:
             if self._browser is not None:
                 self._browser.stop()
         except Exception:
             pass
+        # (c) make sure the process we spawned is really gone.
+        try:
+            proc = self._proc
+            if proc is not None and proc.poll() is None:
+                proc.terminate()
+                if os.name == "nt":
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            timeout=10, check=False)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        self._browser = None
+        self._proc = None
+        self._log("Closed background Chrome.")

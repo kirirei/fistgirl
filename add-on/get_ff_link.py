@@ -3,33 +3,27 @@ Fistgirl FDM add-on - fuckingfast.co direct-link extractor.
 
 Background
 ----------
-fuckingfast.co is now protected by a Cloudflare "managed challenge" + a
-Cloudflare Turnstile widget on every download page. The old approach (a plain
-urllib POST to /f/<id>/go, reading the hx-redirect header) is rejected with
-HTTP 403 "captcha verification failed" because the server requires a valid
-Turnstile / cf_clearance that can only be produced by executing the page's
-JavaScript in a real browser.
+fuckingfast.co is protected by a Cloudflare "managed challenge" + a Turnstile
+widget on every download page, so a plain HTTP request is rejected. This script
+drives the user's *installed* Google Chrome (or Edge) off-screen via the Chrome
+DevTools Protocol (the pure-Python "nodriver" library). Chrome clears the
+challenge, the page fires its htmx POST to /f/<id>/go, and we read the
+"hx-redirect" response header - the real direct-download URL that FDM fetches.
 
-This script therefore drives the user's *installed* Google Chrome (or Edge) via
-the Chrome DevTools Protocol using the pure-Python "nodriver" library. Chrome
-passes the Cloudflare managed challenge automatically, the page fires its
-htmx POST to /f/<id>/go, and we read the "hx-redirect" response header - which
-is the real direct-download URL that FDM can fetch.
+Modes
+-----
+* get_ff_link.py <ff_url>     Resolve one fuckingfast.co page to its direct link,
+                              print it to stdout, and leave the shared off-screen
+                              Chrome running for the next call (FDM calls this once
+                              per link). Contract:
+                                  argv[1] -> fuckingfast.co page URL
+                                  stdout  -> direct URL (success)
+                                  exit 0  -> success ; non-zero -> failure
+* get_ff_link.py --watchdog   Internal. Spawned once alongside Chrome; closes it
+                              once no link has been resolved for IDLE_TIMEOUT
+                              seconds, so nothing is left running.
 
-Design notes
-------------
-* A single Chrome instance is launched once (off-screen, so it is invisible)
-  with a fixed remote-debugging port and a persistent user-data-dir. Every
-  subsequent invocation of this script (FDM calls it once per link) *attaches*
-  to that same Chrome, so the Cloudflare clearance cookie is reused and links
-  after the first resolve quickly.
-* Downloads are denied at the CDP level: we only need the hx-redirect header,
-  not the multi-GB file - FDM performs the actual download.
-
-Contract (unchanged, so msparser.js / parser.js keep working):
-    argv[1]      -> fuckingfast.co page URL
-    stdout       -> the direct-download URL (on success)
-    exit code 0  -> success ; non-zero -> failure (message on stderr)
+Downloads are denied at the CDP level: we only need the header, not the file.
 """
 
 import os
@@ -52,8 +46,12 @@ for _p in (
 DEBUG_PORT = 9333
 PROFILE_DIR = os.path.join(tempfile.gettempdir(), "fistgirl_chrome_profile")
 LOCK_PATH = os.path.join(tempfile.gettempdir(), "fistgirl_launch.lock")
+WATCHDOG_LOCK = os.path.join(tempfile.gettempdir(), "fistgirl_watchdog.lock")
+HEARTBEAT_PATH = os.path.join(tempfile.gettempdir(), "fistgirl_heartbeat")
+CHROME_PID_PATH = os.path.join(tempfile.gettempdir(), "fistgirl_chrome.pid")
 PAGE_TIMEOUT = 45          # seconds to wait for a single link to resolve
 BROWSER_BOOT_TIMEOUT = 45  # seconds to wait for Chrome's debug port to appear
+IDLE_TIMEOUT = 30          # close Chrome this long after the last resolved link
 DEBUG = os.environ.get("FISTGIRL_DEBUG") == "1"
 
 
@@ -74,6 +72,15 @@ def _hard_exit(code):
     except Exception:
         pass
     os._exit(code)
+
+
+def _touch_heartbeat():
+    """Record 'a link is being/was just resolved now' for the idle watchdog."""
+    try:
+        with open(HEARTBEAT_PATH, "w") as fh:
+            fh.write(str(time.time()))
+    except Exception:
+        pass
 
 
 def find_browser():
@@ -101,9 +108,10 @@ def port_alive(port):
 
 
 def _acquire_launch_lock(timeout=300):
-    """Cross-process lock so only one invocation launches Chrome (FDM fires one
-    process per link, and concurrent launches on the same profile/port crash
-    Chrome). Returns a file handle to keep locked, or None."""
+    """Cross-process lock so only one invocation launches/resolves at a time (FDM
+    fires one process per link, and concurrent Turnstile solves in one Chrome are
+    unreliable). Returns a file handle to keep locked, or None. Released when the
+    process exits (the OS closes the handle), including on os._exit."""
     try:
         fd = open(LOCK_PATH, "a+")
     except Exception:
@@ -125,25 +133,88 @@ def _acquire_launch_lock(timeout=300):
             time.sleep(0.3)
 
 
-def _release_launch_lock(fd):
-    if not fd:
-        return
+def _watchdog_already_running():
+    """True if a watchdog currently holds WATCHDOG_LOCK (best-effort)."""
+    if os.name != "nt":
+        return False
     try:
-        if os.name == "nt":
-            import msvcrt
-            try:
-                msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
-            except OSError:
-                pass
-        fd.close()
+        import msvcrt
+        fd = open(WATCHDOG_LOCK, "a+")
+    except Exception:
+        return False
+    try:
+        msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+        try:
+            msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        return False
+    except OSError:
+        return True
+    finally:
+        try:
+            fd.close()
+        except Exception:
+            pass
+
+
+def _spawn_watchdog():
+    """Spawn the idle watchdog once (no-op if one already runs)."""
+    try:
+        if _watchdog_already_running():
+            return
     except Exception:
         pass
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    try:
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "--watchdog"],
+            creationflags=creationflags,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, close_fds=True,
+        )
+        dbg("spawned watchdog")
+    except Exception as e:
+        dbg("watchdog spawn failed:", e)
+
+
+def _kill_chrome():
+    """Terminate the off-screen Chrome we launched (and its child tree)."""
+    pid = None
+    try:
+        with open(CHROME_PID_PATH) as fh:
+            pid = int(fh.read().strip())
+    except Exception:
+        pid = None
+    if pid:
+        if os.name == "nt":
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=10, check=False)
+            except Exception:
+                pass
+        else:
+            try:
+                os.kill(pid, 9)
+            except Exception:
+                pass
+    for p in (CHROME_PID_PATH, HEARTBEAT_PATH):
+        try:
+            os.remove(p)
+        except Exception:
+            pass
 
 
 def ensure_browser(browser_path):
     """Start a persistent, off-screen Chrome with remote debugging, if not already
-    up. The caller holds the global lock, so no two processes launch at once."""
+    up, and make sure the idle watchdog is running. The caller holds the global
+    lock, so no two processes launch at once."""
     if port_alive(DEBUG_PORT):
+        _touch_heartbeat()
+        _spawn_watchdog()
         return
     try:
         os.makedirs(PROFILE_DIR, exist_ok=True)
@@ -168,11 +239,10 @@ def ensure_browser(browser_path):
         "--disable-features=Translate,OptimizationHints,RendererCodeIntegrity",
         "about:blank",
     ]
-    # Detach so Chrome outlives this short-lived process and can be reused.
     creationflags = 0
     if os.name == "nt":
         creationflags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    subprocess.Popen(
+    proc = subprocess.Popen(
         args,
         creationflags=creationflags,
         stdout=subprocess.DEVNULL,
@@ -180,11 +250,18 @@ def ensure_browser(browser_path):
         stdin=subprocess.DEVNULL,
         close_fds=True,
     )
-    dbg("launched Chrome:", browser_path)
+    try:
+        with open(CHROME_PID_PATH, "w") as fh:
+            fh.write(str(proc.pid))
+    except Exception:
+        pass
+    _touch_heartbeat()
+    dbg("launched Chrome:", browser_path, "pid", proc.pid)
     deadline = time.time() + BROWSER_BOOT_TIMEOUT
     while time.time() < deadline:
         if port_alive(DEBUG_PORT):
             dbg("debug port up")
+            _spawn_watchdog()
             return
         time.sleep(0.5)
     raise RuntimeError("Chrome remote-debugging port %d did not come up" % DEBUG_PORT)
@@ -214,7 +291,6 @@ async def resolve(ff_url):
     tab.add_handler(cdp.network.ResponseReceived, on_response)
     await tab.send(cdp.network.enable())
     try:
-        # We only want the redirect header, not the actual (huge) file.
         await tab.send(cdp.browser.set_download_behavior(behavior="deny"))
     except Exception:
         pass
@@ -226,9 +302,9 @@ async def resolve(ff_url):
     reloaded = False
     while time.time() - t0 < PAGE_TIMEOUT:
         await tab.sleep(0.4)
+        _touch_heartbeat()
         if captured.get("hx"):
             break
-        # If the challenge is stuck ~halfway through, reload the page once.
         if not reloaded and time.time() - t0 > PAGE_TIMEOUT / 2:
             reloaded = True
             dbg("no result yet - reloading page once")
@@ -238,46 +314,62 @@ async def resolve(ff_url):
                 pass
             last_click = time.time()
             continue
-        # Nudge the htmx download trigger. Before Cloudflare clearance the server
-        # returns 403, which is harmless; once cleared, the click yields the
-        # hx-redirect header we are listening for. (Many pages auto-submit too.)
         if time.time() - last_click > 2.5:
             last_click = time.time()
-            found = False
             try:
                 el = await tab.select("[hx-post*='/go']", timeout=1)
                 if el:
-                    found = True
                     await el.click()
             except Exception:
                 pass
-            if DEBUG:
-                title = ""
-                try:
-                    title = await tab.evaluate("document.title")
-                except Exception:
-                    pass
-                dbg("t=%.1fs" % (time.time() - t0),
-                    "title=%r" % title,
-                    "go_status=%s" % captured.get("status"),
-                    "dl_button=%s" % found)
 
     try:
         await tab.close()
     except Exception:
         pass
-    # NOTE: intentionally do not call browser.stop() - keep Chrome alive so the
-    # next link reuses the same Cloudflare clearance.
-
     return captured.get("hx")
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("ERROR: No URL provided", file=sys.stderr)
-        sys.exit(1)
+def watchdog_main():
+    """Close Chrome once no link has been resolved for IDLE_TIMEOUT seconds."""
+    fd = None
+    try:
+        fd = open(WATCHDOG_LOCK, "a+")
+        if os.name == "nt":
+            import msvcrt
+            try:
+                msvcrt.locking(fd.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                return  # another watchdog already holds the lock
+    except Exception:
+        pass
+    dbg("watchdog started")
+    while True:
+        time.sleep(5)
+        if not port_alive(DEBUG_PORT):
+            break
+        try:
+            last = os.path.getmtime(HEARTBEAT_PATH)
+        except OSError:
+            last = time.time()  # no heartbeat yet; don't kill prematurely
+        if time.time() - last > IDLE_TIMEOUT:
+            dbg("watchdog: idle, closing chrome")
+            _kill_chrome()
+            break
+    try:
+        if fd is not None:
+            if os.name == "nt":
+                import msvcrt
+                try:
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    pass
+            fd.close()
+    except Exception:
+        pass
 
-    ff_url = sys.argv[1]
+
+def single_main(ff_url):
     if not re.search(r"fuckingfast\.co/[a-zA-Z0-9]+", ff_url):
         print("ERROR: Not a fuckingfast.co URL: " + ff_url, file=sys.stderr)
         sys.exit(1)
@@ -288,11 +380,7 @@ def main():
               "found. Please install Chrome to use this add-on.", file=sys.stderr)
         sys.exit(1)
 
-    # Serialize the whole operation across processes: FDM launches one process
-    # per link and concurrent Turnstile solves in one Chrome are unreliable, so
-    # we process links one at a time. The lock is released automatically when the
-    # process exits (the OS closes the file handle), including on os._exit.
-    lock = _acquire_launch_lock()  # noqa: F841  (kept alive until process exit)
+    lock = _acquire_launch_lock()  # noqa: F841 (kept alive until process exit)
 
     try:
         ensure_browser(browser_path)
@@ -300,6 +388,7 @@ def main():
         print("ERROR: could not start browser: " + str(e), file=sys.stderr)
         _hard_exit(1)
 
+    _touch_heartbeat()
     try:
         try:
             import nodriver as uc
@@ -316,15 +405,22 @@ def main():
     if direct:
         sys.stdout.write(direct.strip() + "\n")
         sys.stdout.flush()
-        # Use os._exit to skip interpreter/nodriver teardown: that teardown tears
-        # down the CDP websocket and segfaults (STATUS_ACCESS_VIOLATION) on exit,
-        # which would give FDM a non-zero exit code even though extraction worked.
-        # We also *want* to leave Chrome running for the next link.
         _hard_exit(0)
 
     print("ERROR: could not obtain direct link (Cloudflare challenge not cleared "
           "in time)", file=sys.stderr)
     _hard_exit(1)
+
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] == "--watchdog":
+        watchdog_main()
+        _hard_exit(0)
+    if not args:
+        print("ERROR: No URL provided", file=sys.stderr)
+        sys.exit(1)
+    single_main(args[0])
 
 
 if __name__ == "__main__":

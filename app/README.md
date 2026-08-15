@@ -36,7 +36,9 @@ opens the app. Later launches are instant.
      batch" window if you want to pick a folder yourself).
 
 The **first** link takes a few seconds (Chrome clears Cloudflare once); the rest
-are fast because the same browser is reused.
+are fast because the same browser is reused. When the fetch finishes, the
+off-screen Chrome is **closed automatically** — nothing is left running. (The
+next fetch re-opens it and clears Cloudflare once more.)
 
 ## Making FDM add silently (optional, one-time)
 
