@@ -23,11 +23,12 @@ direct-download link, which is then handed to FDM.
 > Chrome is used **only to extract the links** — FDM still does the actual
 > downloading.
 
-> **v1.0.7:** the off-screen Chrome now **closes automatically** — after each
-> fetch in the app, and when idle in the `.fda` plugin — so nothing is left
-> running. The plugin fetches the grouped file list like the classic add-on.
+> **Note:** the **`.fda` FDM plugin currently does NOT work** — it lists the parts
+> but FDM cannot resolve the Cloudflare-protected links. Use the **Standalone app**
+> or **Portable `.exe`** below (both work). The off-screen Chrome auto-closes when
+> the fetch is done, so nothing is left running.
 
-## Downloads (v1.0.8)
+## Downloads (v1.0.9)
 
 <p align="center">
   <a href="https://github.com/kirirei/fistgirl/releases/latest">
@@ -41,10 +42,10 @@ Each release ships **three** builds. **Pick one:**
 | --- | --- | --- |
 | **`fistgirl-python.zip`** | Standalone Windows GUI app (run from source). Needs Python 3.10+. | ✅ **Works — recommended** |
 | **`Fistgirl-portable-win64.zip`** | The same app as a portable `.exe`. No Python install needed. | ✅ **Works** |
-| **`fistgirl.fda`** | The classic FDM add-on/plugin (auto-closes Chrome when idle). | ⚠️ **Experimental — not guaranteed.** Use a Python build if it fails. |
+| **`fistgirl.fda`** | The classic FDM add-on/plugin. | ❌ **Does NOT work** (Cloudflare) — use a Python build. Kept for reference. |
 
 **In short:** use the **Standalone Python app** or the **Portable `.exe`**. The
-`.fda` plugin is included only for reference and is not guaranteed to work.
+`.fda` plugin does not currently work and is included only for reference.
 
 ## Requirements
 
@@ -68,10 +69,11 @@ Each release ships **three** builds. **Pick one:**
 The **first** link takes a few seconds (Chrome clears Cloudflare once); the rest
 are fast because the same browser is reused.
 
-## Using the FDM plugin (`fistgirl.fda`) — experimental
+## Using the FDM plugin (`fistgirl.fda`) — does not currently work
 
-> ⚠️ Currently unreliable. If it fails, use the Standalone app / Portable `.exe`
-> above instead.
+> ❌ The plugin lists the files but FDM cannot resolve the Cloudflare-protected
+> links, so downloads fail. **Use the Standalone app / Portable `.exe`** above.
+> The steps below are kept for reference only.
 
 1. Download `fistgirl.fda` from the latest release.
 2. Open Free Download Manager → hamburger menu ☰ → **Add-ons**.

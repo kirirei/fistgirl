@@ -125,9 +125,6 @@ class App(ctk.CTk):
         bar.grid(row=1, column=0, padx=12, pady=0, sticky="ew")
         self.count_label = ctk.CTkLabel(bar, text="No files yet")
         self.count_label.pack(side="left", padx=8, pady=4)
-        self.group_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(bar, text="Group into one folder", variable=self.group_var,
-                        width=20).pack(side="left", padx=12, pady=4)
         ctk.CTkButton(bar, text="Select all", width=90,
                       command=lambda: self._set_all(True)).pack(side="right", padx=4, pady=4)
         ctk.CTkButton(bar, text="Select none", width=90,
@@ -153,11 +150,16 @@ class App(ctk.CTk):
                                       fg_color="gray30", hover_color="gray25",
                                       state="disabled")
         self.copy_btn.grid(row=0, column=1, padx=(4, 8), pady=8, sticky="ew")
+        self.group_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            mid, variable=self.group_var,
+            text="Group in one folder — copies links for FDM's 'Paste URLs from clipboard' (won't auto-start)"
+        ).grid(row=1, column=0, columnspan=2, padx=10, pady=(0, 4), sticky="w")
         self.progress = ctk.CTkProgressBar(mid)
         self.progress.set(0)
-        self.progress.grid(row=1, column=0, columnspan=2, padx=8, pady=(0, 4), sticky="ew")
+        self.progress.grid(row=2, column=0, columnspan=2, padx=8, pady=(0, 4), sticky="ew")
         self.status = ctk.CTkLabel(mid, text="Ready")
-        self.status.grid(row=2, column=0, columnspan=2, padx=8, pady=(0, 6), sticky="w")
+        self.status.grid(row=3, column=0, columnspan=2, padx=8, pady=(0, 6), sticky="w")
 
         # log
         self.logbox = ctk.CTkTextbox(self, height=120)
@@ -304,11 +306,16 @@ class App(ctk.CTk):
 
             if links and (mode == "clipboard" or grouped):
                 text = "\n".join(links)
-                self._ui(lambda t=text: (self.clipboard_clear(), self.clipboard_append(t)))
                 if grouped:
-                    self.log("Grouped: %d link(s) copied. In FDM open 'Add downloads in batch', "
-                             "paste them, and set the folder to \"%s\"." % (len(links), game))
+                    # Name onto the clipboard first (so it's in Win+V history), then
+                    # the links as the live clipboard, ready to paste into FDM.
+                    self._ui(lambda n=game: (self.clipboard_clear(), self.clipboard_append(n)))
+                    await asyncio.sleep(0.25)
+                    self._ui(lambda t=text: (self.clipboard_clear(), self.clipboard_append(t)))
+                    self.log("Grouped: name + %d link(s) copied (name is in clipboard history / Win+V)." % len(links))
+                    self.log("In FDM:  +  →  \"Paste URLs from clipboard\", then set the folder to the game name.")
                 else:
+                    self._ui(lambda t=text: (self.clipboard_clear(), self.clipboard_append(t)))
                     self.log("Copied %d link(s) to clipboard." % len(links))
 
             if grouped:

@@ -35,8 +35,9 @@ opens the app. Later launches are instant.
      clipboard (paste them wherever you like — e.g. FDM's "Add downloads in
      batch" window if you want to pick a folder yourself).
    - **Group into one folder** (checkbox, off by default): resolves everything and
-     copies the links so you can drop them all into one game-named folder via FDM's
-     "Add downloads in batch" (FDM's command line can't set a folder on its own).
+     copies the game name (into clipboard history / Win+V) then the links, so you can
+     use FDM's **"Paste URLs from clipboard"** and name the folder from Win+V (FDM's
+     command line can't set a folder on its own).
 
 The **first** link takes a few seconds (Chrome clears Cloudflare once); the rest
 are fast because the same browser is reused. When the fetch finishes, the

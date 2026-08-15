@@ -137,7 +137,7 @@ jobs:
           Downloads — pick one:
           * **fistgirl-python.zip** — Standalone Python GUI app (needs Python 3.10+). ✅ Recommended, works.
           * **Fistgirl-portable-win64.zip** — Portable .exe, no Python needed. ✅ Works.
-          * **fistgirl.fda** — Classic FDM add-on/plugin. ⚠️ Experimental — currently NOT working reliably; included for reference.
+          * **fistgirl.fda** — Classic FDM add-on/plugin. ❌ Does NOT work (FDM can't resolve the Cloudflare links); kept for reference — use a Python build.
 
           Requires Google Chrome (or Edge) and Free Download Manager 6 installed.
           EOF
